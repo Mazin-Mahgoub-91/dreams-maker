@@ -1,0 +1,183 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dream Incubator V1.1</title>
+<script type="importmap">
+{
+  "imports": {
+    "tone": "https://cdn.jsdelivr.net/npm/tone@14.8.39/+esm"
+  }
+}
+</script>
+<style>
+  body {
+    background: #0a0a0a;
+    color: #e0e0e0;
+    font-family: 'Cairo', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+    overflow: hidden;
+  }
+  .container {
+    text-align: center;
+    z-index: 10;
+    background: rgba(26, 26, 26, 0.8);
+    padding: 25px;
+    border-radius: 12px;
+    border: 1px solid #222;
+    width: 320px;
+  }
+  h1 { color: #00FF10; margin-bottom: 5px; font-size: 22px; }
+  h1 span { font-size: 12px; color: #666; }
+  textarea {
+    width: 100%;
+    height: 80px;
+    background: #111;
+    color: #e0e0e0;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+    resize: none;
+    font-size: 16px;
+    box-sizing: border-box;
+  }
+  button {
+    margin-top: 12px;
+    width: 100%;
+    padding: 12px 30px;
+    background: #00FF10;
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+  button:hover { background: #33ff44; }
+  button:disabled { background: #333; cursor: not-allowed; }
+  button.secondary { background: #333; color: #aaa; font-size: 14px; }
+  
+  .control-group { margin-top: 15px; text-align: right; }
+  .control-group label { display: flex; justify-content: space-between; font-size: 14px; color: #aaa; }
+  input[type=range] { width: 100%; accent-color: #00FF10; }
+  .recommended { color: #00FF10; font-weight: bold; }
+
+  #lucidFlash {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #00FF10;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+    transition: opacity 2s ease-in-out;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>Dream Incubator <span>V1.1</span></h1>
+    <textarea id="prompt" placeholder="مثال: انا بطير فوق النيل في شندي..."></textarea>
+    
+    <div class="control-group">
+      <label>
+        <span>قوة الوميض الأخضر</span>
+        <span id="flashValue" class="recommended">5%</span>
+      </label>
+      <input type="range" id="flashSlider" min="2" max="8" value="5" step="1">
+      <small style="color:#666">Recommended: 5%</small>
+    </div>
+
+    <button id="unlockBtn" class="secondary">1. Unlock Audio</button>
+    <button id="startBtn" disabled>2. Start Incubation</button>
+    <p id="status" style="font-size: 14px; color: #888; min-height: 20px;"></p>
+  </div>
+
+  <div id="lucidFlash"></div>
+
+<script type="module">
+import * as Tone from 'tone';
+
+const unlockBtn = document.getElementById('unlockBtn');
+const startBtn = document.getElementById('startBtn');
+const promptEl = document.getElementById('prompt');
+const statusEl = document.getElementById('status');
+const flashEl = document.getElementById('lucidFlash');
+const flashSlider = document.getElementById('flashSlider');
+const flashValue = document.getElementById('flashValue');
+
+let thetaOsc = null, thetaLFO = null, flashInterval = null, wakeLock = null;
+let flashOpacity = 0.05;
+let audioUnlocked = false;
+
+flashSlider.oninput = () => {
+  flashOpacity = flashSlider.value / 100;
+  flashValue.textContent = flashSlider.value + '%';
+  flashValue.classList.toggle('recommended', flashSlider.value == 5);
+};
+
+// خطوة 1: فك قفل الصوت
+unlockBtn.onclick = async () => {
+  await Tone.start();
+  audioUnlocked = true;
+  unlockBtn.disabled = true;
+  unlockBtn.textContent = 'Audio Unlocked ✓';
+  startBtn.disabled = false;
+  statusEl.textContent = 'تمام، اضغط Start هسي';
+};
+
+// خطوة 2: البداية
+startBtn.onclick = async () => {
+  if (!audioUnlocked) return;
+  if (!promptEl.value.trim()) {
+    alert('اكتب برومبت الحلم أول');
+    return;
+  }
+
+  statusEl.textContent = 'شغال 4Hz-6Hz Sweep... نوم هسي';
+
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch (err) { console.log('Wake Lock ما مدعوم:', err); }
+
+  // V1.1 الجديد: Sweep من 4Hz الى 6Hz كل دقيقتين
+  if (!thetaOsc) {
+    thetaOsc = new Tone.Oscillator().toDestination();
+    thetaOsc.volume.value = -30; 
+    thetaOsc.frequency.value = 4;
+    thetaOsc.start();
+    
+    // LFO = Low Frequency Oscillator. يخلي الصوت يطلع وينزل براهو
+    thetaLFO = new Tone.LFO("2m", 4, 6).start(); 
+    thetaLFO.connect(thetaOsc.frequency);
+  }
+
+  // المحفز Lucid كل 40 ثانية
+  flashInterval = setInterval(() => {
+    flashEl.style.opacity = flashOpacity;
+    setTimeout(() => { flashEl.style.opacity = 0; }, 2000);
+  }, 40000);
+
+  startBtn.disabled = true;
+  startBtn.textContent = 'Incubating 4-6Hz...';
+  unlockBtn.style.display = 'none';
+};
+
+window.addEventListener('beforeunload', async () => {
+  if(thetaOsc) thetaOsc.stop();
+  if(thetaLFO) thetaLFO.stop();
+  clearInterval(flashInterval);
+  if(wakeLock) await wakeLock.release();
+});
+</script>
+</body>
+</html>
