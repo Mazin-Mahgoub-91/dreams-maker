@@ -1,0 +1,154 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dream Incubator V3 TEST</title>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.8.39/build/Tone.js"></script>
+<style>
+  body {background: #0a0a0a;color: #e0e0e0;font-family: 'Cairo', sans-serif;display: flex;flex-direction: column;align-items: center;gap: 20px;padding: 20px;margin: 0;}
+  h1 { color: #FFAA00; margin: 0; font-size: 26px; text-align: center; }
+  h1 span { font-size: 12px; color: #666; }
+.canvas {background: rgba(26, 26, 26, 0.9);padding: 25px;border-radius: 12px;border: 1px solid #222;width: 100%;max-width: 340px;box-sizing: border-box;}
+.canvas h2 {color: #FFAA00; font-size: 18px; margin: 0 0 15px 0; text-align: center; border-bottom: 1px solid #333; padding-bottom: 10px;}
+  textarea {width: 100%;height: 80px;background: #111;color: #e0e0e0;border: 1px solid #333;border-radius: 8px;padding: 10px;resize: none;font-size: 16px;box-sizing: border-box;}
+  button {margin-top: 12px;width: 100%;padding: 12px 30px;background: #FFAA00;color: #000;border: none;border-radius: 8px;font-size: 18px;font-weight: bold;cursor: pointer;transition: 0.3s;}
+  button:hover { background: #FFBB33; }
+  button:disabled { background: #333; cursor: not-allowed; opacity: 0.6;}
+  button.secondary { background: #333; color: #aaa; font-size: 14px; }
+.control-group { margin-top: 15px; text-align: right; }
+.control-group label { display: flex; justify-content: space-between; font-size: 14px; color: #aaa; }
+  input[type=range] { width: 100%; accent-color: #FFAA00; }
+.recommended { color: #FFAA00; font-weight: bold; }
+.warning { color: #FF5555; font-weight: bold; }
+.status-text {font-size: 13px; color: #888; min-height: 20px; text-align: right; margin-top: 8px;}
+.status-text span {color: #FFAA00;}
+  #lucidFlash {position: fixed;top: 0; left: 0;width: 100%; height: 100%;background: #FFAA00;opacity: 0;pointer-events: none;z-index: 1;transition: opacity 2s ease-in-out;}
+.disabled {opacity: 0.4; pointer-events: none;}
+</style>
+</head>
+<body>
+  <h1>Dream Incubator <span>V3 TEST</span></h1>
+  <div class="canvas" id="dreamGate">
+    <h2>بوابة الحلم TEST</h2>
+    <textarea id="prompt" placeholder="جرب: ابتث"></textarea>
+    <div class="control-group">
+      <label><span>قوة الوميض الأخضر</span><span id="flashValue" class="recommended">5%</span></label>
+      <input type="range" id="flashSlider" min="2" max="8" value="5" step="1">
+    </div>
+    <div class="control-group">
+      <label><span>قوة صوت ثيتا</span><span id="volValue">-30 dB</span></label>
+      <input type="range" id="volSlider" min="-40" max="0" value="-30" step="2">
+      <small class="warning">Max: 0 dB</small>
+    </div>
+    <button id="unlockBtn" class="secondary">1. Unlock Audio</button>
+    <button id="startBtn" disabled>2. Start TEST</button>
+    <div class="status-text" id="status0"></div>
+    <div class="status-text" id="status1"></div>
+    <div class="status-text" id="status2"></div>
+  </div>
+  <div class="canvas disabled" id="realityGate">
+    <h2>بوابة الواقع TEST</h2>
+    <p style="font-size:12px;color:#666;text-align:center;margin:0;">تضخيم بعد 4 دقائق</p>
+    <div class="status-text" id="realityStatus">ينتظر 4 دقائق...</div>
+  </div>
+  <div id="lucidFlash"></div>
+<script>
+const ARABIC_LETTERS = 'ابتثجحخدذرزسشصضطظعغفقكلمنهوي';
+const FREQ_DICT = {
+  'ا':4.00,'ب':4.06,'ت':4.13,'ث':4.19,'ج':4.26,'ح':4.32,'خ':4.39,'د':4.45,'ذ':4.52,'ر':4.58,
+  'ز':4.65,'س':4.71,'ش':4.77,'ص':4.84,'ض':4.90,'ط':4.97,'ظ':5.03,'ع':5.10,'غ':5.16,'ف':5.23,
+  'ق':5.29,'ك':5.35,'ل':5.42,'م':5.48,'ن':5.55,'ه':5.61,'و':5.68,'ي':5.74
+};
+
+const unlockBtn = document.getElementById('unlockBtn');
+const startBtn = document.getElementById('startBtn');
+const promptEl = document.getElementById('prompt');
+const s0 = document.getElementById('status0');
+const s1 = document.getElementById('status1');
+const s2 = document.getElementById('status2');
+const realityStatus = document.getElementById('realityStatus');
+const realityGate = document.getElementById('realityGate');
+const flashEl = document.getElementById('lucidFlash');
+const flashSlider = document.getElementById('flashSlider');
+const flashValue = document.getElementById('flashValue');
+const volSlider = document.getElementById('volSlider');
+const volValue = document.getElementById('volValue');
+
+let dreamOsc = null, dreamLFO = null, realityOsc = null;
+let flashInterval = null, wakeLock = null;
+let phaseTimers = [];
+let flashOpacity = 0.05;
+let thetaVolume = -30;
+let audioUnlocked = false;
+let letterIndex = 0;
+let letterInterval = null;
+
+flashSlider.oninput = () => {flashOpacity = flashSlider.value / 100;flashValue.textContent = flashSlider.value + '%';};
+volSlider.oninput = () => {thetaVolume = parseFloat(volSlider.value);volValue.textContent = thetaVolume + ' dB';if (dreamOsc) dreamOsc.volume.value = thetaVolume; if(realityOsc) realityOsc.volume.value = thetaVolume - 6;};
+
+unlockBtn.onclick = async () => {await Tone.start();audioUnlocked = true;unlockBtn.disabled = true;unlockBtn.textContent = 'Audio Unlocked ✓';startBtn.disabled = false;};
+
+function startLetterBroadcast(letters) {
+  clearInterval(letterInterval);
+  letterIndex = 0;
+  if(letters.length === 0) { s2.innerHTML = '<span>Phase 2</span>: مافي حروف عربية'; return; }
+
+  const firstChar = letters[0];
+  s2.innerHTML = '<span>Phase 2</span>: جاري بث اشارة الحرف: ' + firstChar + ' لمدة 3 دقائق';
+  dreamOsc.frequency.value = FREQ_DICT[firstChar] || 6;
+
+  letterInterval = setInterval(() => {
+    letterIndex++;
+    if(letterIndex >= letters.length) letterIndex = 0;
+    const currentChar = letters[letterIndex];
+    dreamOsc.frequency.value = FREQ_DICT[currentChar] || 6;
+    s2.innerHTML = '<span>Phase 2</span>: جاري بث اشارة الحرف: ' + currentChar + ' لمدة 3 دقائق';
+  }, 180000); // 3 دقائق = 180000 ملي ثانية
+}
+
+startBtn.onclick = async () => {
+  if (!audioUnlocked) return;
+  const rawText = promptEl.value.trim();
+  const letters = rawText.split('').filter(c => ARABIC_LETTERS.includes(c));
+
+  try { if ('wakeLock' in navigator) {wakeLock = await navigator.wakeLock.request('screen');} } catch (err) {}
+
+  dreamOsc = new Tone.Oscillator(6).toDestination();
+  dreamOsc.volume.value = thetaVolume;
+  dreamOsc.start();
+  dreamLFO = new Tone.LFO("2m", 4, 6);
+
+  s0.innerHTML = '<span>Phase 0</span>: 6Hz لمدة 2 دقيقة';
+  phaseTimers.push(setTimeout(() => {
+    dreamLFO.start();
+    dreamLFO.connect(dreamOsc.frequency);
+    s1.innerHTML = '<span>Phase 1</span>: 4-6Hz Sweep';
+  }, 120000));
+
+  phaseTimers.push(setTimeout(() => {
+    dreamLFO.disconnect();
+    dreamLFO.stop();
+    startLetterBroadcast(letters);
+  }, 240000));
+
+  phaseTimers.push(setTimeout(() => {
+    realityGate.classList.remove('disabled');
+    realityOsc = new Tone.Oscillator(6).toDestination();
+    realityOsc.volume.value = thetaVolume - 6;
+    realityOsc.start();
+    realityStatus.innerHTML = '<span>نشط TEST</span>: تضخيم 6Hz';
+  }, 240000));
+
+  flashInterval = setInterval(() => {flashEl.style.opacity = flashOpacity;setTimeout(() => { flashEl.style.opacity = 0; }, 2000);}, 5000);
+  startBtn.disabled = true; startBtn.textContent = 'TESTING...'; unlockBtn.style.display = 'none';
+};
+
+window.addEventListener('beforeunload', async () => {
+  if(dreamOsc) dreamOsc.stop(); if(dreamLFO) dreamLFO.stop(); if(realityOsc) realityOsc.stop();
+  clearInterval(flashInterval); clearInterval(letterInterval); phaseTimers.forEach(clearTimeout);
+  if(wakeLock) await wakeLock.release();
+});
+</script>
+</body>
+</html>
